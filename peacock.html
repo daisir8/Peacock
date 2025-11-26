@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sassy Voxel Peacock</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f0f0f5; font-family: sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; }
+        #loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #666; font-size: 1.2rem; pointer-events: none;
+        }
+    </style>
+    <!-- Import Map for Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <style>
+      /* Hides common overlay IDs and classes used in Three.js examples and generated code */
+      #info, #loading, #ui, #instructions, .label, .overlay, #description {
+        display: none !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        visibility: hidden !important;
+      }
+      /* Ensure the body doesn't show selected text cursor interaction outside canvas */
+      body {
+        user-select: none !important;
+      }
+    </style>
+  </head>
+<body>
+    <div id="loading">Constructing Personality...</div>
+    <div id="canvas-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Configuration ---
+        const VOXEL_SIZE = 0.5;
+        const GAP = 0.02; // Slight gap between blocks for that "lego" look
+        
+        // Palette based on the sketch (Peacock vibes)
+        const COLORS = {
+            BODY: new THREE.Color(0x008b8b),    // Dark Cyan
+            BODY_LIGHT: new THREE.Color(0x20b2aa), // Light Sea Green
+            BELLY: new THREE.Color(0xe0ffff),   // Light Cyan
+            RUFF: new THREE.Color(0xffffff),    // White collar
+            BEAK: new THREE.Color(0xffa500),    // Orange
+            EYE_WHITE: new THREE.Color(0xffffff),
+            EYE_PUPIL: new THREE.Color(0x222222),
+            EYELID: new THREE.Color(0xdda0dd),  // Plum (makeup look)
+            CROWN: new THREE.Color(0xffd700),   // Gold
+            TAIL_BASE: new THREE.Color(0x006400), // Dark Green
+            TAIL_TIP: new THREE.Color(0x40e0d0),  // Turquoise
+            LEGS: new THREE.Color(0xffdab9),    // Peach
+        };
+
+        // --- Scene Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xfdfbf7); // Warm paper-like background
+        scene.fog = new THREE.Fog(scene.background, 20, 60);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(12, 12, 16);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.target.set(0, 5, 0);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.1;
+        dirLight.shadow.camera.far = 50;
+        dirLight.shadow.camera.left = -15;
+        dirLight.shadow.camera.right = 15;
+        dirLight.shadow.camera.top = 15;
+        dirLight.shadow.camera.bottom = -15;
+        scene.add(dirLight);
+
+        const backLight = new THREE.DirectionalLight(0x99ccff, 0.5);
+        backLight.position.set(-10, 5, -10);
+        scene.add(backLight);
+
+        // --- Voxel Builder System ---
+        class VoxelWorld {
+            constructor() {
+                this.voxels = new Map(); // Key: "x,y,z", Value: Color
+            }
+
+            set(x, y, z, color) {
+                const key = `${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
+                this.voxels.set(key, color);
+            }
+
+            // Helper: Fill a sphere
+            sphere(cx, cy, cz, radius, color) {
+                for (let x = -radius; x <= radius; x++) {
+                    for (let y = -radius; y <= radius; y++) {
+                        for (let z = -radius; z <= radius; z++) {
+                            if (x*x + y*y + z*z <= radius*radius) {
+                                this.set(cx + x, cy + y, cz + z, color);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Helper: Fill an ellipsoid
+            ellipsoid(cx, cy, cz, rx, ry, rz, color) {
+                for (let x = -rx; x <= rx; x++) {
+                    for (let y = -ry; y <= ry; y++) {
+                        for (let z = -rz; z <= rz; z++) {
+                            if ((x*x)/(rx*rx) + (y*y)/(ry*ry) + (z*z)/(rz*rz) <= 1) {
+                                this.set(cx + x, cy + y, cz + z, color);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        const world = new VoxelWorld();
+
+        // --- Sculpting the Peacock based on the Sketch ---
+
+        // 1. Body (Plump and round)
+        // Center around Y=6
+        world.ellipsoid(0, 5, 0, 4, 5, 4, COLORS.BODY);
+        // Belly patch
+        world.ellipsoid(0, 4, 2, 2.5, 3.5, 2, COLORS.BELLY);
+
+        // 2. Head (Large, slightly oval)
+        const headY = 11;
+        const headZ = 1;
+        world.sphere(0, headY, headZ, 3.5, COLORS.BODY_LIGHT);
+
+        // 3. The Ruff (Collar) - Wavy ring around neck
+        // The sketch emphasizes this ruffle
+        for (let ang = 0; ang < Math.PI * 2; ang += 0.2) {
+            const r = 4.5;
+            const wavyY = headY - 3.5 + Math.sin(ang * 8) * 0.5; // Wavy effect
+            const vx = Math.cos(ang) * r;
+            const vz = Math.sin(ang) * r + headZ;
+            
+            // Make it thick
+            world.set(vx, wavyY, vz, COLORS.RUFF);
+            world.set(vx * 0.9, wavyY, vz * 0.9, COLORS.RUFF);
+            world.set(vx * 0.8, wavyY + 0.5, vz * 0.8, COLORS.RUFF); // Collar goes up neck
+        }
+
+        // 4. Face Features
+        // Beak (Sharp, pointing out)
+        for(let z=0; z<4; z++) {
+            let size = 2 - (z * 0.6);
+            for(let x=-size; x<=size; x++) {
+                for(let y=-size; y<=size; y++) {
+                    world.set(x, headY - 1, headZ + 3 + z, COLORS.BEAK);
+                }
+            }
+        }
+
+        // Eyes (Large, heavy lidded for sass)
+        const eyeX = 1.8;
+        const eyeY = headY + 0.5;
+        const eyeZ = headZ + 2.8;
+
+        // Whites
+        world.set(-eyeX, eyeY, eyeZ, COLORS.EYE_WHITE);
+        world.set(-eyeX-1, eyeY, eyeZ-0.5, COLORS.EYE_WHITE);
+        world.set(eyeX, eyeY, eyeZ, COLORS.EYE_WHITE);
+        world.set(eyeX+1, eyeY, eyeZ-0.5, COLORS.EYE_WHITE);
+
+        // Pupils (Looking slightly side-eye/down)
+        world.set(-eyeX, eyeY, eyeZ+0.1, COLORS.EYE_PUPIL);
+        world.set(eyeX, eyeY, eyeZ+0.1, COLORS.EYE_PUPIL);
+
+        // Eyelids (The "Sassy" part - half closed)
+        world.set(-eyeX, eyeY + 1, eyeZ, COLORS.EYELID);
+        world.set(-eyeX-1, eyeY + 1, eyeZ-0.5, COLORS.EYELID);
+        world.set(eyeX, eyeY + 1, eyeZ, COLORS.EYELID);
+        world.set(eyeX+1, eyeY + 1, eyeZ-0.5, COLORS.EYELID);
+        
+        // Eyebrows (Voxel lines above eyes for expression)
+        world.set(-eyeX, eyeY + 2, eyeZ, COLORS.BODY);
+        world.set(eyeX, eyeY + 2, eyeZ, COLORS.BODY);
+
+        // 5. The Crown (Royalty)
+        const crownY = headY + 3.5;
+        // Base ring
+        for(let ang=0; ang<Math.PI*2; ang+=0.5) {
+            world.set(Math.cos(ang)*2, crownY, headZ + Math.sin(ang)*2, COLORS.CROWN);
+        }
+        // Spikes
+        [0, Math.PI/2, Math.PI, -Math.PI/2].forEach(angle => {
+             world.set(Math.cos(angle)*2, crownY+1, headZ + Math.sin(angle)*2, COLORS.CROWN);
+             world.set(Math.cos(angle)*2, crownY+2, headZ + Math.sin(angle)*2, COLORS.CROWN);
+        });
+
+        // 6. Legs (Skinny)
+        // Left Leg
+        for(let y=0; y<3; y++) world.set(-2, y, 0, COLORS.LEGS);
+        // Right Leg (Bent/posed slightly)
+        for(let y=1; y<3; y++) world.set(2, y, 0, COLORS.LEGS);
+        world.set(2, 0.5, 0.5, COLORS.LEGS); // Foot lifted
+        
+        // Feet
+        world.set(-2, 0, 1, COLORS.LEGS);
+        world.set(-2, 0, -0.5, COLORS.LEGS);
+        world.set(2, 0.5, 1.5, COLORS.LEGS);
+
+        // 7. Tail (Fanned out back)
+        // Based on "Display" text in sketch
+        for (let ang = -2.5; ang <= -0.6; ang += 0.1) {
+            // Create rays
+            for (let r = 4; r < 10; r++) {
+                const tx = Math.cos(ang) * r; // Sideways
+                const ty = Math.sin(ang) * r + 8; // Upwards fan
+                const tz = -3 - (r*0.2); // Behind body
+                
+                // Gradient color for tail
+                let col = COLORS.TAIL_BASE;
+                if (r > 8) col = COLORS.TAIL_TIP;
+                
+                // Add thickness
+                world.set(tx * 1.5, ty, tz, col);
+                
+                // Add "eyes" of the feathers randomly
+                if (r === 9 && Math.random() > 0.5) {
+                     world.set(tx * 1.5, ty, tz+0.5, COLORS.CROWN);
+                }
+            }
+        }
+        
+        // Symmetrical tail fan (Mirroring logic roughly)
+        for (let ang = -0.6; ang <= 2.5; ang += 0.1) {
+             // Adjust angle for upward fan
+             const adjustedAng = Math.PI + ang; 
+             for (let r = 4; r < 10; r++) {
+                // Creating a fan shape in XY plane behind the bird
+                const tx = (ang) * 4; 
+                const ty = 4 + r;
+                const tz = -4;
+
+                let col = COLORS.TAIL_BASE;
+                if (r > 8) col = COLORS.TAIL_TIP;
+
+                // Using polar coords for a better fan
+                const fanAngle = ang * 0.5 + Math.PI/2; // center upwards
+                const fx = Math.cos(fanAngle) * r * 1.2;
+                const fy = Math.sin(fanAngle) * r + 5;
+                
+                world.set(fx, fy, tz, col);
+                 if (r === 9 && Math.floor(ang*10)%2===0) {
+                     world.set(fx, fy, tz+0.5, COLORS.CROWN);
+                }
+             }
+        }
+
+        // --- Instanced Mesh Generation ---
+        const geometry = new THREE.BoxGeometry(VOXEL_SIZE - GAP, VOXEL_SIZE - GAP, VOXEL_SIZE - GAP);
+        // Slightly rounded edges for better look
+        // geometry.deleteAttribute('uv'); // Optimization if not using textures
+
+        const material = new THREE.MeshStandardMaterial({ 
+            roughness: 0.5, 
+            metalness: 0.1 
+        });
+
+        const voxelCount = world.voxels.size;
+        const instancedMesh = new THREE.InstancedMesh(geometry, material, voxelCount);
+        instancedMesh.castShadow = true;
+        instancedMesh.receiveShadow = true;
+
+        const dummy = new THREE.Object3D();
+        let i = 0;
+
+        for (const [key, color] of world.voxels) {
+            const [x, y, z] = key.split(',').map(Number);
+            
+            dummy.position.set(x * VOXEL_SIZE, y * VOXEL_SIZE, z * VOXEL_SIZE);
+            dummy.updateMatrix();
+            
+            instancedMesh.setMatrixAt(i, dummy.matrix);
+            instancedMesh.setColorAt(i, color);
+            
+            i++;
+        }
+
+        scene.add(instancedMesh);
+        
+        // Add a floor shadow catcher
+        const planeGeo = new THREE.PlaneGeometry(50, 50);
+        const planeMat = new THREE.ShadowMaterial({ opacity: 0.1 });
+        const plane = new THREE.Mesh(planeGeo, planeMat);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.y = -0.5;
+        scene.add(plane);
+
+        document.getElementById('loading').style.display = 'none';
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            controls.update();
+            
+            // Slight float/breathe animation
+            const time = Date.now() * 0.001;
+            instancedMesh.position.y = Math.sin(time) * 0.2;
+            instancedMesh.rotation.y = Math.sin(time * 0.5) * 0.1;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
